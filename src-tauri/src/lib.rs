@@ -27,7 +27,9 @@ pub fn run() {
                 if let Some(monitor) = monitor {
                     let screen_width = monitor.size().width as f64 / monitor.scale_factor();
                     let x = (screen_width / 2.0) - 200.0; // 400px wide island / 2
-                    let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, 10));
+                    // x is in logical pixels — use LogicalPosition so Tauri converts
+                    // correctly on HiDPI displays instead of misplacing the window.
+                    let _ = window.set_position(tauri::LogicalPosition::new(x, 10.0));
                 }
             }
             Ok(())

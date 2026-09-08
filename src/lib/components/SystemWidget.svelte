@@ -1,8 +1,8 @@
 <script lang="ts">
   import { tauriInvoke } from '$lib/utils/tauri';
 
-  interface CpuInfo { usage_percent: number; }
-  interface MemoryInfo { used_gb: number; total_gb: number; usage_percent: number; }
+  interface CpuInfo { name: string; usage: number; frequency: number; }
+  interface MemoryInfo { total: number; used: number; free: number; usage_percent: number; }
   interface BatteryInfo { percent: number; charging: boolean; }
 
   let cpu = $state(32);
@@ -14,17 +14,17 @@
 
   async function fetchSystem() {
     try {
-      const cpuData = await tauriInvoke<CpuInfo>('get_cpu_usage');
+      const cpus = await tauriInvoke<CpuInfo[]>('get_cpu_usage');
       const oldCpu = cpu;
-      cpu = Math.round(cpuData.usage_percent);
+      cpu = Math.round(cpus.reduce((a, c) => a + c.usage, 0) / Math.max(cpus.length, 1));
       if (Math.abs(cpu - oldCpu) > 5) triggerSparkle();
     } catch {}
 
     try {
       const memData = await tauriInvoke<MemoryInfo>('get_memory_info');
       mem = {
-        used: Math.round(memData.used_gb * 10) / 10,
-        total: Math.round(memData.total_gb * 10) / 10,
+        used: Math.round((memData.used / 2 ** 30) * 10) / 10,
+        total: Math.round((memData.total / 2 ** 30) * 10) / 10,
         percent: Math.round(memData.usage_percent),
       };
     } catch {}

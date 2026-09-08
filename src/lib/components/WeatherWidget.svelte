@@ -6,8 +6,8 @@
     feels_like: number;
     humidity: number;
     wind_speed: number;
-    condition: string;
-    location: string;
+    description: string;
+    city: string;
   }
 
   let weather: WeatherData = $state({
@@ -15,8 +15,8 @@
     feels_like: 31,
     humidity: 65,
     wind_speed: 12,
-    condition: 'partly_cloudy',
-    location: 'Hyderabad',
+    description: 'Partly cloudy',
+    city: 'Current Location',
   });
 
   const conditionIcons: Record<string, string> = {
@@ -41,13 +41,28 @@
     wind: 'Windy',
   };
 
-  let icon = $derived(conditionIcons[weather.condition] || '🌤️');
-  let label = $derived(conditionLabels[weather.condition] || 'Unknown');
+  // Rust backend returns a human description (e.g. "Rain", "Clear sky"); map it
+  // to the condition keys used by the icon/label/particle-effect lookups.
+  function conditionKey(description: string): string {
+    const d = description.toLowerCase();
+    if (d.includes('thunder')) return 'thunderstorm';
+    if (d.includes('rain') || d.includes('drizzle')) return 'rain';
+    if (d.includes('snow')) return 'snow';
+    if (d.includes('fog') || d.includes('mist')) return 'mist';
+    if (d.includes('partly')) return 'partly_cloudy';
+    if (d.includes('cloud')) return 'cloudy';
+    if (d.includes('clear')) return 'clear';
+    return 'partly_cloudy';
+  }
+
+  let condition = $derived(conditionKey(weather.description));
+  let icon = $derived(conditionIcons[condition] || '🌤️');
+  let label = $derived(conditionLabels[condition] || weather.description);
 
   // Weather particle effects
-  let showRain = $derived(weather.condition === 'rain' || weather.condition === 'thunderstorm');
-  let showSnow = $derived(weather.condition === 'snow');
-  let showSun = $derived(weather.condition === 'clear');
+  let showRain = $derived(condition === 'rain' || condition === 'thunderstorm');
+  let showSnow = $derived(condition === 'snow');
+  let showSun = $derived(condition === 'clear');
 
   async function fetchWeather() {
     try {
@@ -86,7 +101,7 @@
     <div class="weather-left">
       <div class="weather-icon">{icon}</div>
       <div class="weather-condition">{label}</div>
-      <div class="weather-location">📍 {weather.location}</div>
+      <div class="weather-location">📍 {weather.city}</div>
     </div>
 
     <div class="weather-right">

@@ -1,7 +1,18 @@
 <script lang="ts">
   import { tauriInvoke } from '$lib/utils/tauri';
 
-  interface MediaStatus {
+  interface RawMediaStatus {
+    playing: boolean;
+    title: string;
+    artist: string;
+    album: string;
+    album_art_url: string | null;
+    progress: number;
+    duration: number;
+    player: string;
+  }
+
+  interface MediaInfo {
     title: string;
     artist: string;
     album: string;
@@ -11,7 +22,7 @@
     album_art_url: string;
   }
 
-  let media: MediaStatus = $state({
+  let media: MediaInfo = $state({
     title: 'Sparkle',
     artist: 'RADWIMPS',
     album: 'Your Name OST',
@@ -38,7 +49,20 @@
 
   async function fetchMedia() {
     try {
-      media = await tauriInvoke<MediaStatus>('get_media_status');
+      // Backend returns null when no MPRIS player is active — keep current
+      // (demo) data instead of nulling the widget and crashing the template.
+      const m = await tauriInvoke<RawMediaStatus | null>('get_media_status');
+      if (m) {
+        media = {
+          title: m.title,
+          artist: m.artist,
+          album: m.album,
+          is_playing: m.playing,
+          position_seconds: m.progress,
+          duration_seconds: m.duration,
+          album_art_url: m.album_art_url ?? '',
+        };
+      }
     } catch {
       // keep demo data
     }
