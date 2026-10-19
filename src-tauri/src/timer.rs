@@ -133,7 +133,10 @@ pub fn stop_stopwatch() -> StopwatchStatus {
 pub fn get_stopwatch_status() -> StopwatchStatus {
     let sw = STOPWATCH.lock().unwrap();
     let elapsed = if sw.active {
-        sw.accumulated + sw.start_time.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0)
+        sw.accumulated
+            + sw.start_time
+                .map(|s| s.elapsed().as_secs_f64())
+                .unwrap_or(0.0)
     } else {
         sw.accumulated
     };

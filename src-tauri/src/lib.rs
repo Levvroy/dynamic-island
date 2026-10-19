@@ -1,6 +1,9 @@
 use tauri::Manager;
 
 mod clipboard;
+mod domain;
+mod error;
+mod ipc;
 mod media;
 mod notifications;
 mod system;
@@ -22,20 +25,16 @@ pub fn run() {
                 let _ = window.set_decorations(false);
                 let _ = window.set_always_on_top(true);
                 let _ = window.set_skip_taskbar(true);
-                // Center at top of screen
-                let monitor = window.current_monitor().ok().flatten();
-                if let Some(monitor) = monitor {
-                    let screen_width = monitor.size().width as f64 / monitor.scale_factor();
-                    let x = (screen_width / 2.0) - 200.0; // 400px wide island / 2
-                    // x is in logical pixels — use LogicalPosition so Tauri converts
-                    // correctly on HiDPI displays instead of misplacing the window.
-                    let _ = window.set_position(tauri::LogicalPosition::new(x, 10.0));
+                // Resting size; the frontend resizes per state via window_set_bounds.
+                if let Err(e) = ipc::window::apply_bounds(&window, 200.0, 36.0) {
+                    eprintln!("initial window placement failed: {e}");
                 }
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            ipc::window::window_set_bounds,
             system::get_system_info,
             system::get_cpu_usage,
             system::get_memory_info,

@@ -52,12 +52,16 @@ Prioritas alert (tinggi → rendah): `charging` > `calendar` > `deadline` > `foc
 | Expanded | `hover.leave` / — | base |
 | Expanded(music) | `lyrics.open` [lirik tersedia] / — | Wide(lirik) |
 | Wide | `lyrics.close` atau `hover.leave` / — | base |
-| * | `alert(a)` [tidak ada alert aktif] / simpan prev, mulai timer durasi | Alert(a) |
-| Alert(b) | `alert(a)` [prio(a) > prio(b)] / antrekan b | Alert(a) |
-| Alert(b) | `alert(a)` [prio(a) ≤ prio(b)] / antrekan a | Alert(b) |
-| Alert | `alert.timeout` [antrean kosong] / — | prev |
-| Alert | `alert.timeout` [antrean tidak kosong] / ambil berikutnya | Alert(next) |
-| * | `alert(a)` [focus aktif ∧ prio(a) < focus] / tahan sampai fase selesai (KF-043) | (tetap) |
+| * | `alert(a)` [tidak ada alert aktif ∧ (jeda ≥ 10 dtk sejak alert terakhir ∨ a = charging)] / mulai timer durasi | Alert(a) |
+| * | `alert(a)` [selain itu] / antrekan a (urut prioritas) | (tetap) |
+| Alert(b) | `alert(a)` [a = charging ∧ b ≠ charging] / antrekan b | Alert(a) |
+| Alert | `alert.timeout` [antrean kosong] / — | dasar/overlay |
+| Alert | `alert.timeout` [kepala antrean siap: jeda ≥ 10 dtk ∨ charging] / ambil kepala | Alert(next) |
+| (tanpa alert) | `tick` [kepala antrean siap] / ambil kepala | Alert(next) |
+| * | `alert(a)` [focus aktif ∧ prio(a) < focus] / tahan (KF-043) | (tetap) |
+| * | `focus.ended` / pindahkan alert tertahan ke antrean | (sesuai antrean) |
+
+Catatan implementasi: alert tampil di atas overlay hover. Setelah alert selesai, notch kembali ke Expanded/Wide bila kursor masih di atasnya. Hanya `charging` yang boleh menyela alert lain dan mengabaikan jeda minimum (KNF-010). Implementasi: `src/lib/notch/machine.ts` (murni) + `store.svelte.ts` (timer, resize window).
 
 ## 4. Kontrak IPC (rencana, akan diperbarui per inkremen)
 
@@ -74,7 +78,15 @@ Event (Rust → frontend). Payload `snake_case`, dengan tipe yang cocok di `src/
 | `notification://received` | `{ app, sender, received_ms }` |
 | `github://changed` | `{ failed_runs, review_requests }` |
 
-Command: `media_command(action)`, `focus_start/pause/cancel`, `todo_*`, `water_log`, `calendar_set_sources`, `github_set_token`, `settings_get/set`. Semua mengembalikan `Result<T, AppError>`.
+Command yang sudah ada:
+
+| Command | Argumen | Hasil |
+|---|---|---|
+| `window_set_bounds` | `{ width, height }` (piksel logis, 16..=2000) | `Result<(), AppError>`. Window diubah ukurannya lalu diletakkan di tengah atas monitornya |
+
+`AppError` diserialisasi sebagai `{ kind: "invalid_argument" \| "window", message }` (`src-tauri/src/error.rs` ↔ `src/lib/ipc/types.ts`).
+
+Command rencana: `media_command(action)`, `focus_start/pause/cancel`, `todo_*`, `water_log`, `calendar_set_sources`, `github_set_token`, `settings_get/set`. Semua mengembalikan `Result<T, AppError>`.
 
 ## 5. Keputusan arsitektur
 
