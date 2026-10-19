@@ -5,7 +5,7 @@ Kolom modul berisi lokasi target. "baseline" berarti kode lama sudah ada tetapi 
 
 | Kebutuhan | Prio | UC | Modul / file (target) | Test | Status |
 |---|---|---|---|---|---|
-| KF-001..007 | Must | UC-01 | `src/lib/stores/notch.ts`, `Island.svelte` (baseline) | Vitest state machine | ✗ |
+| KF-001..007 | Must | UC-01 | `src/lib/notch/machine.ts`, `src/lib/notch/store.svelte.ts`, `Island.svelte`, `src-tauri/src/ipc/window.rs`, `domain/window.rs` | `machine.test.ts` (21), `domain::window::tests` (3) | ◐ test hijau, belum divalidasi user |
 | KF-010..014 | Must | UC-02 | `app/media.rs`, `adapters/windows/smtc.rs`; baseline `media.rs` (stub Windows) | service + mock | ✗ |
 | KF-020..023 | Should | UC-03 | `domain/lrc.rs`, `adapters/net/lrclib.rs` | unit parser, service + mock | ✗ |
 | KF-030..034 | Must | UC-04 | `app/power.rs`, `adapters/windows/power.rs`; baseline `system.rs` (hardcode 100%) | service + mock | ✗ |
@@ -28,7 +28,7 @@ Kolom modul berisi lokasi target. "baseline" berarti kode lama sudah ada tetapi 
 | KNF-005 | Should | — | build | artefak CI | ✗ |
 | KNF-006 | Must | semua | ADR 0004 | test adapter error | ✗ |
 | KNF-007 | Must | UC-03, 11, 13 | `tauri.conf.json` CSP | review | ✗ |
-| KNF-008 | Must | UC-01 | window click-through | manual | ✗ |
+| KNF-008 | Must | UC-01 | window menempel ukuran pil (`boundsFor`) | manual | ✗ belum diukur |
 | KNF-009 | Must | UC-10 | — | log | ✗ |
-| KNF-010 | Should | UC-01 | antrean alert | Vitest | ✗ |
+| KNF-010 | Should | UC-01 | `machine.ts` (`ALERT_MIN_GAP_MS`) | `machine.test.ts` | ◐ |
 | KNF-011 | Must | UC-13 | `SecretStore` | review | ✗ |

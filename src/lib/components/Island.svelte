@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { activeWidget, islandState, isHovered, type WidgetType } from '$lib/stores/island';
-  import Particles from './Particles.svelte';
+  import { onDestroy } from 'svelte';
+  import { NotchStore } from '$lib/notch/store.svelte';
+  import { boundsFor, type FeatureId } from '$lib/notch/machine';
   import MediaWidget from './MediaWidget.svelte';
   import SystemWidget from './SystemWidget.svelte';
   import WeatherWidget from './WeatherWidget.svelte';
@@ -8,322 +9,246 @@
   import TimerWidget from './TimerWidget.svelte';
   import ClipboardWidget from './ClipboardWidget.svelte';
 
-  let currentWidget: WidgetType = $state('system');
-  let currentState = $state<'compact' | 'expanded' | 'wide'>('compact');
-  let hovered = $state(false);
+  const notch = new NotchStore();
+  onDestroy(() => notch.destroy());
+
+  const view = $derived(notch.view);
+  const size = $derived(boundsFor(view));
+
+  let visible = $state(typeof document === 'undefined' || document.visibilityState === 'visible');
+  $effect(() => {
+    const onVis = () => (visible = document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  });
+
+  // The clock shows minutes, so wake once per minute boundary instead of every second,
+  // and not at all while hidden (KNF-001).
   let now = $state(new Date());
-  let glowIntensity = $state(0);
-  let expandTimeout: ReturnType<typeof setTimeout> | undefined;
-
-  // Sync stores
-  $effect(() => { activeWidget.set(currentWidget); });
-  $effect(() => { islandState.set(currentState); });
-  $effect(() => { isHovered.set(hovered); });
-
-  // Clock
   $effect(() => {
-    const interval = setInterval(() => { now = new Date(); }, 1000);
-    return () => clearInterval(interval);
+    if (!visible) return;
+    let t: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      now = new Date();
+      t = setTimeout(tick, 60_000 - (Date.now() % 60_000) + 50);
+    };
+    tick();
+    return () => clearTimeout(t);
+  });
+  const timeStr = $derived(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+  // Eyes blink by toggling a class on a sparse timer; no animation runs between blinks (KNF-001).
+  let blinking = $state(false);
+  $effect(() => {
+    if (!visible || view.kind !== 'resting') return;
+    let t: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      t = setTimeout(() => {
+        blinking = true;
+        t = setTimeout(() => {
+          blinking = false;
+          schedule();
+        }, 160);
+      }, 6000 + Math.random() * 4000);
+    };
+    schedule();
+    return () => {
+      clearTimeout(t);
+      blinking = false;
+    };
   });
 
-  // Glow pulse
-  $effect(() => {
-    let frame: number;
-    let t = 0;
-    function pulse() {
-      t += 0.03;
-      glowIntensity = (Math.sin(t) + 1) / 2;
-      frame = requestAnimationFrame(pulse);
-    }
-    pulse();
-    return () => cancelAnimationFrame(frame);
-  });
-
-  const timeStr = $derived(
-    now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-  );
-
-  const widgets: { type: WidgetType; icon: string; label: string }[] = [
-    { type: 'system', icon: '⚡', label: 'System' },
+  const widgets: { type: FeatureId; icon: string; label: string }[] = [
     { type: 'media', icon: '🎵', label: 'Media' },
+    { type: 'timer', icon: '⏱', label: 'Timer' },
+    { type: 'system', icon: '⚡', label: 'System' },
     { type: 'weather', icon: '🌸', label: 'Weather' },
     { type: 'notifications', icon: '🔔', label: 'Alerts' },
-    { type: 'timer', icon: '⏱', label: 'Timer' },
     { type: 'clipboard', icon: '📋', label: 'Clips' },
   ];
 
-  function expand(widget?: WidgetType) {
-    if (widget) currentWidget = widget;
-    currentState = currentWidget === 'media' ? 'wide' : 'expanded';
-  }
-
-  function collapse() {
-    currentState = 'compact';
-  }
-
-  function toggleExpand() {
-    if (currentState === 'compact') {
-      expand();
-    } else {
-      collapse();
-    }
-  }
-
-  function selectWidget(w: WidgetType) {
-    currentWidget = w;
-    currentState = w === 'media' ? 'wide' : 'expanded';
-  }
-
-  function handleMouseEnter() {
-    hovered = true;
-    clearTimeout(expandTimeout);
-  }
-
-  function handleMouseLeave() {
-    hovered = false;
-    if (currentState !== 'compact') {
-      expandTimeout = setTimeout(collapse, 2000);
-    }
-  }
-
-  const islandWidth = $derived(
-    currentState === 'compact' ? 380 : currentState === 'wide' ? 420 : 380
-  );
-  const islandHeight = $derived(
-    currentState === 'compact' ? 48 : currentState === 'wide' ? 200 : 300
-  );
-
-  const glowColor = $derived(
-    `rgba(255, 45, 149, ${0.3 + glowIntensity * 0.25})`
-  );
-  const glowColor2 = $derived(
-    `rgba(0, 240, 255, ${0.2 + glowIntensity * 0.2})`
-  );
+  const ALERT_LABEL: Record<string, string> = {
+    charging: 'Charging',
+    calendar: 'Jadwal',
+    deadline: 'Deadline',
+    focus: 'Fokus',
+    notification: 'Notifikasi',
+    github: 'GitHub',
+    reminder: 'Pengingat',
+    summary: 'Ringkasan',
+  };
 </script>
 
 <div
-  class="island-wrapper"
-  style="width: {islandWidth}px; height: {islandHeight}px;"
+  class="pill"
+  class:open={view.kind === 'expanded' || view.kind === 'wide'}
+  style="width: {size.width}px; height: {size.height}px;"
+  role="region"
+  aria-label="Notch"
+  onmouseenter={() => notch.hoverEnter()}
+  onmouseleave={() => notch.hoverLeave()}
 >
-  <div
-    class="island"
-    class:compact={currentState === 'compact'}
-    class:expanded={currentState !== 'compact'}
-    class:hovered
-    role="button"
-    tabindex="0"
-    onmouseenter={handleMouseEnter}
-    onmouseleave={handleMouseLeave}
-    onclick={currentState === 'compact' ? () => toggleExpand() : undefined}
-    onkeydown={(e) => e.key === 'Enter' && toggleExpand()}
-    style="
-      --glow-1: {glowColor};
-      --glow-2: {glowColor2};
-      box-shadow:
-        0 0 15px {glowColor},
-        0 0 30px {glowColor2},
-        inset 0 0 20px rgba(255, 45, 149, 0.05);
-    "
-  >
-    <Particles />
-
-    <div class="island-content">
-      {#if currentState === 'compact'}
-        <!-- Compact: time + status dots -->
-        <div class="compact-content">
-          <div class="compact-left">
-            <span class="time-display">{timeStr}</span>
-          </div>
-          <div class="compact-right">
-            {#each widgets as w}
-              <button
-                class="status-dot"
-                class:active={currentWidget === w.type}
-                title={w.label}
-                onclick={(e: MouseEvent) => { e.stopPropagation(); expand(w.type); }}
-              >
-                <span class="dot-icon">{w.icon}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      {:else}
-        <!-- Expanded: tab bar + widget -->
-        <div class="expanded-content">
-          <div class="tab-bar">
-            {#each widgets as w}
-              <button
-                class="tab-btn"
-                class:active={currentWidget === w.type}
-                onclick={() => selectWidget(w.type)}
-              >
-                <span class="tab-icon">{w.icon}</span>
-                <span class="tab-label">{w.label}</span>
-              </button>
-            {/each}
-            <button class="collapse-btn" onclick={collapse} title="Collapse">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M3 5L7 9L11 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </button>
-          </div>
-
-          <div class="widget-area">
-            {#if currentWidget === 'media'}
-              <MediaWidget />
-            {:else if currentWidget === 'system'}
-              <SystemWidget />
-            {:else if currentWidget === 'weather'}
-              <WeatherWidget />
-            {:else if currentWidget === 'notifications'}
-              <NotificationWidget />
-            {:else if currentWidget === 'timer'}
-              <TimerWidget />
-            {:else if currentWidget === 'clipboard'}
-              <ClipboardWidget />
-            {/if}
-          </div>
-        </div>
+  {#if view.kind === 'resting'}
+    <div class="row">
+      <span class="eyes" class:blink={blinking} aria-hidden="true"><i></i><i></i></span>
+      <span class="time">{timeStr}</span>
+    </div>
+  {:else if view.kind === 'closed'}
+    <div class="row">
+      <span class="time">{timeStr}</span>
+      <span class="wave" aria-label="Musik diputar"><i></i><i></i><i></i><i></i></span>
+    </div>
+  {:else if view.kind === 'alert'}
+    <div class="row alert">
+      <span class="alert-kind">{ALERT_LABEL[view.alert.kind]}</span>
+      {#if typeof view.alert.payload?.text === 'string'}
+        <span class="alert-text">{view.alert.payload.text}</span>
       {/if}
     </div>
-  </div>
+  {:else}
+    <div class="expanded">
+      <div class="tabs">
+        {#each widgets as w (w.type)}
+          <button
+            class="tab"
+            class:active={notch.model.selected === w.type}
+            onclick={() => notch.dispatch({ type: 'select', feature: w.type })}
+          >
+            <span>{w.icon}</span><span class="tab-label">{w.label}</span>
+          </button>
+        {/each}
+      </div>
+      <div class="widget">
+        {#if notch.model.selected === 'media'}
+          <MediaWidget />
+        {:else if notch.model.selected === 'system'}
+          <SystemWidget />
+        {:else if notch.model.selected === 'weather'}
+          <WeatherWidget />
+        {:else if notch.model.selected === 'notifications'}
+          <NotificationWidget />
+        {:else if notch.model.selected === 'timer'}
+          <TimerWidget />
+        {:else if notch.model.selected === 'clipboard'}
+          <ClipboardWidget />
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  .island-wrapper {
-    position: fixed;
-    top: 8px;
+  .pill {
+    position: absolute;
+    top: 0;
     left: 50%;
     transform: translateX(-50%);
-    transition:
-      width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-      height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-    z-index: 9999;
-  }
-
-  .island {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border-radius: 26px;
-    background: linear-gradient(
-      135deg,
-      rgba(26, 10, 46, 0.88) 0%,
-      rgba(10, 10, 26, 0.92) 50%,
-      rgba(26, 10, 46, 0.88) 100%
-    );
-    backdrop-filter: blur(24px) saturate(1.8);
-    -webkit-backdrop-filter: blur(24px) saturate(1.8);
-    border: 1px solid rgba(255, 45, 149, 0.2);
+    border-radius: 0 0 18px 18px;
+    background: rgba(10, 10, 20, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: none;
     overflow: hidden;
-    cursor: default;
+    color: #fff;
+    /* Duration must stay in sync with SHRINK_DELAY_MS in store.svelte.ts. */
     transition:
-      box-shadow 0.3s ease,
-      border-color 0.3s ease;
-    animation: glow-pulse 3s ease-in-out infinite;
+      width 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.1),
+      height 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.1),
+      border-radius 0.3s ease;
   }
 
-  .island.hovered {
-    border-color: rgba(255, 45, 149, 0.45);
+  .pill.open {
+    border-radius: 0 0 24px 24px;
   }
 
-  .island.compact {
-    cursor: pointer;
-  }
-
-  @keyframes glow-pulse {
-    0%, 100% {
-      border-color: rgba(255, 45, 149, 0.2);
-    }
-    50% {
-      border-color: rgba(0, 240, 255, 0.35);
-    }
-  }
-
-  .island-content {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    height: 100%;
-  }
-
-  /* Compact state */
-  .compact-content {
+  .row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     height: 100%;
-    padding: 0 16px;
-    animation: fade-scale 0.3s ease;
+    padding: 0 14px;
+    gap: 10px;
   }
 
-  .compact-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .time-display {
-    font-size: 14px;
+  .time {
+    font-size: 13px;
     font-weight: 600;
-    color: #fff;
-    letter-spacing: 0.5px;
-    text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+    letter-spacing: 0.4px;
+    font-variant-numeric: tabular-nums;
   }
 
-  .compact-right {
+  .eyes {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    gap: 6px;
   }
 
-  .status-dot {
-    width: 28px;
-    height: 28px;
+  .eyes i {
+    width: 7px;
+    height: 10px;
     border-radius: 50%;
-    border: none;
-    background: rgba(255, 255, 255, 0.06);
+    background: #9fe8ff;
+    transition: transform 0.08s ease;
+  }
+
+  .eyes.blink i {
+    transform: scaleY(0.1);
+  }
+
+  .wave {
     display: flex;
     align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    padding: 0;
+    gap: 2px;
+    height: 14px;
   }
 
-  .status-dot:hover {
-    background: rgba(255, 45, 149, 0.2);
-    transform: scale(1.15);
+  .wave i {
+    width: 3px;
+    height: 100%;
+    border-radius: 2px;
+    background: #ff6fb5;
+    animation: wave 0.9s ease-in-out infinite;
   }
 
-  .status-dot.active {
-    background: rgba(255, 45, 149, 0.25);
-    box-shadow: 0 0 8px rgba(255, 45, 149, 0.4);
+  .wave i:nth-child(2) { animation-delay: -0.2s; }
+  .wave i:nth-child(3) { animation-delay: -0.45s; }
+  .wave i:nth-child(4) { animation-delay: -0.7s; }
+
+  @keyframes wave {
+    0%, 100% { transform: scaleY(0.3); }
+    50% { transform: scaleY(1); }
   }
 
-  .dot-icon {
+  .alert {
+    justify-content: flex-start;
+  }
+
+  .alert-kind {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .alert-text {
     font-size: 12px;
-    line-height: 1;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  /* Expanded state */
-  .expanded-content {
+  .expanded {
     display: flex;
     flex-direction: column;
     height: 100%;
-    animation: fade-scale 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
-  .tab-bar {
+  .tabs {
     display: flex;
-    align-items: center;
     gap: 2px;
     padding: 6px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
   }
 
-  .tab-btn {
+  .tab {
     display: flex;
     align-items: center;
     gap: 3px;
@@ -331,71 +256,28 @@
     border: none;
     border-radius: 12px;
     background: transparent;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.55);
     font-size: 11px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
   }
 
-  .tab-btn:hover {
+  .tab:hover {
     background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.8);
   }
 
-  .tab-btn.active {
-    background: linear-gradient(135deg, rgba(255, 45, 149, 0.25), rgba(0, 240, 255, 0.15));
+  .tab.active {
+    background: rgba(255, 255, 255, 0.14);
     color: #fff;
-    box-shadow: 0 0 10px rgba(255, 45, 149, 0.2);
-  }
-
-  .tab-icon {
-    font-size: 12px;
-    line-height: 1;
   }
 
   .tab-label {
     font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.3px;
   }
 
-  .collapse-btn {
-    margin-left: auto;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    padding: 0;
-  }
-
-  .collapse-btn:hover {
-    background: rgba(255, 45, 149, 0.2);
-    color: #fff;
-  }
-
-  .widget-area {
+  .widget {
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     padding: 8px 12px 10px;
-    min-height: 0;
-  }
-
-  @keyframes fade-scale {
-    from {
-      opacity: 0;
-      transform: scale(0.95);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
   }
 </style>
